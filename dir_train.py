@@ -41,6 +41,7 @@ parser.add_argument('--epochs', type=int, default=200)
 parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--id', type=str, default="default")
 parser.add_argument('--learning_rate', type=float, default=0.1)
+parser.add_argument('--gradient_norm', type=float, default=0.5)
 parser.add_argument('--test', type=bool, default=False)
 parser.add_argument('--data_augmentation', action='store_true', default=False,
                     help='augment data by flipping and cropping')
@@ -255,8 +256,10 @@ else:
 if args.dataset == 'svhn':
     scheduler = MultiStepLR(cnn_optimizer, milestones=[60, 120], gamma=0.1)
 else:
-    scheduler = MultiStepLR(cnn_optimizer, milestones=[60, 120, 160], gamma=0.2)
-    #scheduler = MultiStepLR(cnn_optimizer, milestones=[40, 80, 120], gamma=0.2)
+    if args.model == 'resnet':
+        scheduler = MultiStepLR(cnn_optimizer, milestones=[90, 150, 180], gamma=0.2)
+    else:
+        scheduler = MultiStepLR(cnn_optimizer, milestones=[60, 120, 160], gamma=0.2)
 
 if args.model == 'densenet':
     cnn_optimizer = torch.optim.SGD(cnn.parameters(), lr=args.learning_rate, momentum=0.9, nesterov=True, weight_decay=1e-4)
@@ -297,13 +300,13 @@ for epoch in range(1, args.epochs):
 
         alphas, confidence = obtain_dirichelets(pred_original, True)
 
-        train_loss, train_loss_KL = mse_loss(labels, alphas, args.KL)
+        train_loss, train_loss_KL = mse_loss(labels, alphas, annealing)
         xentropy_loss = torch.mean(train_loss + train_loss_KL)
-        
+
         total_loss = xentropy_loss
 
         total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(cnn.parameters(), 0.25)
+        torch.nn.utils.clip_grad_norm_(cnn.parameters(), args.gradient_norm)
 
         cnn_optimizer.step()
 

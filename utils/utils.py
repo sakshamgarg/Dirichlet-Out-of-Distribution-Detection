@@ -22,7 +22,6 @@ def mse_loss(label, alpha, max_weight):
     loss = -(torch.digamma(alpha) - torch.digamma(alpha.sum(-1)).unsqueeze(-1))
     selected_loss = loss.gather(1, label.unsqueeze(-1)).squeeze()
     uncertain_bias = 1.0
-    #annealing_coef = min(annealing_step / 100.0 * max_weight, max_weight)
     annealing_coef = max_weight
 
     mask = 1 - one_hot(label, alpha.size(1))
