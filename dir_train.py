@@ -19,7 +19,7 @@ import seaborn as sns  # import this after torch or it will break everything
 import sys
 from models.vgg import VGG
 from models.densenet import DenseNet3
-from models.wideresnet import WideResNet, WideResNetNew
+from models.wideresnet import WideResNet
 from models.resnet import ResNet18, ResNet34
 from utils.utils import CSVLogger, Cutout, obtain_dirichelets, mse_loss
 
@@ -44,6 +44,7 @@ parser.add_argument('--learning_rate', type=float, default=0.1)
 parser.add_argument('--test', type=bool, default=False)
 parser.add_argument('--data_augmentation', action='store_true', default=False,
                     help='augment data by flipping and cropping')
+parser.add_argument('--KL', type=float, default=0.01)
 parser.add_argument('--cutout', type=int, default=16, metavar='S',
                     help='patch size to cut out. 0 indicates no cutout')
 parser.add_argument('--baseline', action='store_true', default=False,
@@ -247,7 +248,7 @@ cnn = torch.nn.DataParallel(cnn)
 cnn.to(device)
 
 if args.dataset == "cifar10" or args.dataset == "cifar100":
-    cnn_optimizer = torch.optim.SGD(cnn.parameters(), lr=args.learning_rate, momentum=0.9, weight_decay=5e-4)
+    cnn_optimizer = torch.optim.SGD(cnn.parameters(), lr=args.learning_rate, nesterov=True, momentum=0.9, weight_decay=5e-4)
 else:
     cnn_optimizer = torch.optim.Adam(cnn.parameters(), lr=args.learning_rate, weight_decay=5e-4)
 
@@ -271,6 +272,9 @@ if os.path.exists(file_path):
     cnn.load_state_dict(pretrained_dict)
     print("reloading model from {}".format(file_path))
 
+def isnan(x):
+    return x != x
+
 # Start with a reasonable guess for lambda
 for epoch in range(1, args.epochs):
     xentropy_loss_avg = 0.
@@ -293,13 +297,14 @@ for epoch in range(1, args.epochs):
 
         alphas, confidence = obtain_dirichelets(pred_original, True)
 
-        train_loss, train_loss_KL = mse_loss(labels, alphas, epoch)
-
+        train_loss, train_loss_KL = mse_loss(labels, alphas, args.KL)
         xentropy_loss = torch.mean(train_loss + train_loss_KL)
-
+        
         total_loss = xentropy_loss
 
         total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(cnn.parameters(), 0.25)
+
         cnn_optimizer.step()
 
         xentropy_loss_avg += torch.mean(train_loss).item()

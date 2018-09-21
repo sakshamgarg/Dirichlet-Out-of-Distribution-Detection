@@ -18,11 +18,12 @@ def one_hot(seq_batch, depth):
     index = seq_batch.view(seq_batch.size()+torch.Size([1]))
     return out.scatter_(dim,index,1)
 
-def mse_loss(label, alpha, annealing_step):    
+def mse_loss(label, alpha, max_weight):    
     loss = -(torch.digamma(alpha) - torch.digamma(alpha.sum(-1)).unsqueeze(-1))
     selected_loss = loss.gather(1, label.unsqueeze(-1)).squeeze()
     uncertain_bias = 1.0
-    annealing_coef = min(annealing_step / 100.0, 0.01)
+    #annealing_coef = min(annealing_step / 100.0 * max_weight, max_weight)
+    annealing_coef = max_weight
 
     mask = 1 - one_hot(label, alpha.size(1))
     appended = one_hot(label, alpha.size(1))
@@ -50,7 +51,7 @@ def entropy(alpha):
     return entropy, logB, digamma_1, digamma_2
 
 def obtain_dirichelets(logits, mean=False):
-    alpha = torch.exp(logits)
+    alpha = torch.exp(logits)# + 1
     evidence = torch.relu(logits) + 1
     ent, ret1, ret2, ret3 = entropy(evidence)
     conf = -ent

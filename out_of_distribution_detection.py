@@ -18,7 +18,7 @@ import seaborn as sns
 
 from models.vgg import VGG, VarVGG
 from models.densenet import DenseNet3
-from models.wideresnet import WideResNet, WideResNetNew
+from models.wideresnet import WideResNet
 from models.resnet import ResNet18
 from utils.ood_metrics import tpr95, detection
 from utils.datasets import GaussianNoise, UniformNoise
@@ -46,7 +46,7 @@ parser.add_argument('--process', default='confidence', choices=process_options)
 parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--smooth', type=float, default=0.1)
 parser.add_argument('--T', type=float, default=1000., help='Scaling temperature')
-parser.add_argument('--epsilon', type=float, default=0.01, help='Noise magnitude')
+parser.add_argument('--epsilon', type=float, default=0.005, help='Noise magnitude')
 parser.add_argument('--checkpoint', default='cifar10_vgg13_budget_0.3_seed_0', type=str,
                     help='filepath for checkpoint to load')
 parser.add_argument('--validation', action='store_true', default=False,
@@ -309,11 +309,7 @@ def evaluate(data_loader, mode):
     sys.exit(0)
     """
 
-    if len(failed_out) > 0:
-        failed_out = np.concatenate(failed_out)
-        return out, failed_out
-    else:
-        return out
+    return out
 
 ind_scores = evaluate(ind_loader, args.process)
 ind_labels = np.ones(ind_scores.shape[0])
