@@ -82,7 +82,7 @@ class VGG(nn.Module):
 
         pred = self.classifier(out)
         confidence = self.confidence(out)
-        return pred, confidence
+        return pred, None
 
     def _make_layers(self, cfg):
         layers = []

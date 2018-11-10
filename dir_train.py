@@ -20,7 +20,7 @@ import sys
 from models.vgg import VGG
 from models.densenet import DenseNet3
 from models.wideresnet import WideResNet
-from models.resnet import ResNet18, ResNet34
+from models.resnet import *
 from utils.utils import CSVLogger, Cutout, obtain_dirichelets, mse_loss
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -38,6 +38,7 @@ parser.add_argument('--dataset', default='cifar10', choices=dataset_options)
 parser.add_argument('--model', default='vgg13', choices=model_options)
 parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--epochs', type=int, default=200)
+parser.add_argument('--option', type=str, default="prior")
 parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--id', type=str, default="default")
 parser.add_argument('--learning_rate', type=float, default=0.1)
@@ -57,7 +58,10 @@ filename = args.dataset + '_' + args.model + '_' + args.id
 
 if args.dataset == 'svhn' and args.model == 'wideresnet':
     args.model = 'wideresnet16_8'
-
+elif args.dataset == 'cifar10' and args.model == 'resnet':
+    args.model = 'resnet18'
+elif args.dataset == 'cifar100' and args.model == 'resnet':
+    args.model = 'resnet34'
 
 print args
 
@@ -165,7 +169,7 @@ def test(loader):
             images = Variable(images).to(device)
         labels = labels.to(device)
         pred, _ = cnn(images)
-        alphas, conf = obtain_dirichelets(pred, False)
+        alphas, _, conf = obtain_dirichelets(pred, mean=False)
         pred_value, pred = torch.max(pred.data, 1)
         correct.extend((pred == labels).cpu().numpy())
         probability.extend(pred_value.cpu().numpy())
@@ -210,7 +214,7 @@ def ood_evaluate():
             images.retain_grad()
 
             pre_logits, _ = cnn(images)
-            alphas, confidence = obtain_dirichelets(pre_logits, False)
+            alphas, _, confidence = obtain_dirichelets(pre_logits, mean=False)
 
             confidence = confidence.data.cpu().numpy()
             out.append(confidence)
@@ -233,8 +237,10 @@ def ood_evaluate():
     return fpr_at_95_tpr
 
 
-if args.model == 'resnet':
-    cnn = ResNet18()        
+if args.model == 'resnet18':
+    cnn = ResNet18(num_classes=num_classes)
+elif args.model == 'resnet34':
+    cnn = ResNet34(num_classes=num_classes)
 elif args.model == 'wideresnet':
     cnn = WideResNet(depth=28, num_classes=num_classes, widen_factor=10)
 elif args.model == 'wideresnet16_8':
@@ -298,9 +304,9 @@ for epoch in range(1, args.epochs):
 
         pred_original, _ = cnn(images)
 
-        alphas, confidence = obtain_dirichelets(pred_original, True)
+        alphas, _, confidence = obtain_dirichelets(pred_original, mean=True)
 
-        train_loss, train_loss_KL = mse_loss(labels, alphas, annealing)
+        train_loss, train_loss_KL = mse_loss(labels, alphas, args.KL, option=args.option)
         xentropy_loss = torch.mean(train_loss + train_loss_KL)
 
         total_loss = xentropy_loss

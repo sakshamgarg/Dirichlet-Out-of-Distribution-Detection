@@ -1,6 +1,38 @@
 import torch
 import csv
 import numpy as np
+import math
+from torch.nn.parameter import Parameter
+import torch.nn.functional as F
+import torch.nn as nn
+
+class Transit(nn.Module):
+    def __init__(self, in_features, out_features, bias=True):
+        super(Transit, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = Parameter(torch.Tensor(out_features, in_features))
+        if bias:
+            self.bias = Parameter(torch.Tensor(out_features))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        #stdv = 1. / math.sqrt(self.weight.size(1))
+        #self.weight.data.uniform_(-stdv, stdv)
+        self.weight.data.copy_(torch.zeros(self.in_features, self.in_features))
+        if self.bias is not None:
+            self.bias.data.uniform_(-stdv, stdv)
+
+    def forward(self, input):
+        weight = torch.clamp(self.weight, min=-1, max=1)
+        return F.linear(input, self.weight, self.bias) + input
+
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, self.bias is not None
+        )
 
 def cosine_distance(x1, x2):
     norm_0 = torch.sqrt(torch.pow(x1, 2).sum(1, True))
@@ -18,18 +50,19 @@ def one_hot(seq_batch, depth):
     index = seq_batch.view(seq_batch.size()+torch.Size([1]))
     return out.scatter_(dim,index,1)
 
-def mse_loss(label, alpha, max_weight):    
-    loss = -(torch.digamma(alpha) - torch.digamma(alpha.sum(-1)).unsqueeze(-1))
+def mse_loss(label, alpha, max_weight, option="variational"):
+    if option == "variational":
+        loss = -(torch.digamma(alpha) - torch.digamma(alpha.sum(-1)).unsqueeze(-1))
+    elif option == "prior":
+        loss = -torch.log(alpha / alpha.sum(-1, keepdim=True))
     selected_loss = loss.gather(1, label.unsqueeze(-1)).squeeze()
-    uncertain_bias = 1.0
-    annealing_coef = max_weight
-
+   
     mask = 1 - one_hot(label, alpha.size(1))
     appended = one_hot(label, alpha.size(1))
     alpha = alpha * mask + appended
 
     def KL(alp):
-        beta = torch.FloatTensor(1, alpha.size(1)).fill_(uncertain_bias).cuda()
+        beta = torch.FloatTensor(1, alpha.size(1)).fill_(1.0).cuda()
         S_alpha = torch.sum(alpha, -1, True)
         S_beta = torch.sum(beta, -1, True)
         lnB = torch.lgamma(S_alpha) - torch.sum(torch.lgamma(alpha), -1, True)
@@ -39,7 +72,7 @@ def mse_loss(label, alpha, max_weight):
         kl = torch.sum((alpha - beta) * (dg1 - dg0), -1, True) + lnB + lnB_uni
         return kl
 
-    return selected_loss, annealing_coef * KL(alpha)
+    return selected_loss, max_weight * KL(alpha)
 
 def entropy(alpha):
     alpha0 = torch.sum(alpha, 1)
@@ -49,15 +82,14 @@ def entropy(alpha):
     entropy = logB + digamma_1 + digamma_2
     return entropy, logB, digamma_1, digamma_2
 
-def obtain_dirichelets(logits, mean=False):
-    alpha = torch.exp(logits)# + 1
-    evidence = torch.relu(logits) + 1
-    ent, ret1, ret2, ret3 = entropy(evidence)
+def obtain_dirichelets(logits, func=lambda x:torch.relu(x), mean=False):
+    alpha = torch.exp(logits).clamp(0, 1000)
+    evidence = func(alpha) 
+    ent, ret1, ret2, ret3 = entropy(evidence)    
     conf = -ent
-
     if mean:
         conf = torch.mean(conf)
-    return alpha, conf
+    return alpha, evidence, conf
 
 class CSVLogger():
     def __init__(self, args, filename='log.csv', fieldnames=['epoch']):
