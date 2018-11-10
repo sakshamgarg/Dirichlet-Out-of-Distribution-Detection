@@ -32,13 +32,14 @@ conf_histogram = None
 
 dataset_options = ['cifar10', 'svhn', 'cifar100']
 model_options = ['resnet', 'wideresnet', 'densenet', 'vgg13']
+f = lambda x: torch.log(x+1)
 
 parser = argparse.ArgumentParser(description='CNN')
 parser.add_argument('--dataset', default='cifar10', choices=dataset_options)
 parser.add_argument('--model', default='vgg13', choices=model_options)
 parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--epochs', type=int, default=200)
-parser.add_argument('--option', type=str, default="prior")
+parser.add_argument('--option', type=str, default="variational")
 parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--id', type=str, default="default")
 parser.add_argument('--learning_rate', type=float, default=0.1)
@@ -101,17 +102,6 @@ if args.dataset == 'cifar10':
                                     train=False,
                                     transform=test_transform,
                                     download=True)
-
-elif args.dataset == 'cifar100':
-    num_classes = 100
-    train_dataset = datasets.CIFAR100(root='data/',
-                                   train=True,
-                                   transform=train_transform,
-                                   download=True)    
-    test_dataset = datasets.CIFAR100(root='data/',
-                                   train=False,
-                                   transform=test_transform,
-                                   download=True)
 elif args.dataset == 'svhn':
     num_classes = 10
     train_dataset = datasets.SVHN(root='data/',
@@ -123,7 +113,17 @@ elif args.dataset == 'svhn':
                                  split='test',
                                  transform=test_transform,
                                  download=True)
-
+elif args.dataset == 'cifar100':
+    num_classes = 100
+    train_dataset = datasets.CIFAR100(root='data/',
+                                   train=True,
+                                   transform=train_transform,
+                                   download=True)    
+    test_dataset = datasets.CIFAR100(root='data/',
+                                   train=False,
+                                   transform=test_transform,
+                                   download=True)
+    
 # Data Loader (Input Pipeline)
 train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                            batch_size=args.batch_size,
@@ -169,7 +169,7 @@ def test(loader):
             images = Variable(images).to(device)
         labels = labels.to(device)
         pred, _ = cnn(images)
-        alphas, _, conf = obtain_dirichelets(pred, mean=False)
+        alphas, _, conf = obtain_dirichelets(pred, func=f, mean=False)
         pred_value, pred = torch.max(pred.data, 1)
         correct.extend((pred == labels).cpu().numpy())
         probability.extend(pred_value.cpu().numpy())
@@ -214,7 +214,7 @@ def ood_evaluate():
             images.retain_grad()
 
             pre_logits, _ = cnn(images)
-            alphas, _, confidence = obtain_dirichelets(pre_logits, mean=False)
+            alphas, _, confidence = obtain_dirichelets(pre_logits, func=f, mean=False)
 
             confidence = confidence.data.cpu().numpy()
             out.append(confidence)
@@ -304,7 +304,7 @@ for epoch in range(1, args.epochs):
 
         pred_original, _ = cnn(images)
 
-        alphas, _, confidence = obtain_dirichelets(pred_original, mean=True)
+        alphas, _, confidence = obtain_dirichelets(pred_original, func=f, mean=True)
 
         train_loss, train_loss_KL = mse_loss(labels, alphas, args.KL, option=args.option)
         xentropy_loss = torch.mean(train_loss + train_loss_KL)

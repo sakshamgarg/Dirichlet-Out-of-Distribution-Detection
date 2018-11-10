@@ -37,7 +37,6 @@ parser.add_argument('--ood_dataset', default='tinyImageNet_resize', choices=ood_
 parser.add_argument('--model', default='vgg13', choices=model_options)
 parser.add_argument('--process', default='confidence', choices=process_options)
 parser.add_argument('--batch_size', type=int, default=128)
-parser.add_argument('--option', type=str, default="prior")
 parser.add_argument('--T', type=float, default=1000., help='Scaling temperature')
 parser.add_argument('--epsilon', type=float, default=0.005, help='Noise magnitude')
 parser.add_argument('--checkpoint', default='cifar10_vgg13_budget_0.3_seed_0', type=str,
@@ -158,8 +157,6 @@ if os.path.exists(proj_filename):
 
 cnn.eval()
 
-#f = lambda x: torch.log(x+1)
-f = lambda x: torch.relu(x)
 ##############################################
 ### Evaluate out-of-distribution detection ###
 ##############################################
@@ -179,9 +176,11 @@ def evaluate(data_loader, mode):
         if mode == 'dirichlet':
             cnn.zero_grad()
             pre_logits, _ = cnn(images)
+            f = lambda x: torch.log(x+1)
+            
             alphas, _, confidence = obtain_dirichelets(pre_logits, func=f, mean=False)
             _, pred_idx = torch.max(pre_logits.data, 1)
-            loss = torch.mean(mse_loss(Variable(pred_idx), alphas, 0, option=args.option)[0])
+            loss = torch.mean(mse_loss(Variable(pred_idx), alphas, 0, option="variational")[0])
             loss.backward()
             images = images - args.epsilon * torch.sign(images.grad)
             
@@ -193,9 +192,12 @@ def evaluate(data_loader, mode):
             out.append(confidence)
             
         elif mode == 'finetune':
+            f = lambda x: torch.relu(x)
+
             pre_logits, _ = cnn(images)
             logits = proj(pre_logits)
-            alphas, _, confidence = obtain_dirichelets(logits, func=lambda x:x, mean=False)
+            
+            alphas, _, confidence = obtain_dirichelets(logits, func=f, mean=False)
             confidence = confidence.data.cpu().numpy()
             out.append(confidence)
 
