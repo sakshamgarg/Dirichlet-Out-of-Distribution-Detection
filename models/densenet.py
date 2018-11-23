@@ -1,5 +1,3 @@
-# modified from https://github.com/andreasveit/densenet-pytorch/blob/master/densenet.py
-
 import math
 import torch
 import torch.nn as nn
@@ -61,7 +59,7 @@ class DenseBlock(nn.Module):
         self.layer = self._make_layer(block, in_planes, growth_rate, nb_layers, dropRate)
     def _make_layer(self, block, in_planes, growth_rate, nb_layers, dropRate):
         layers = []
-        for i in range(nb_layers):
+        for i in range(int(nb_layers)):
             layers.append(block(in_planes+i*growth_rate, growth_rate, dropRate))
         return nn.Sequential(*layers)
     def forward(self, x):
@@ -100,8 +98,6 @@ class DenseNet3(nn.Module):
         self.fc = nn.Linear(in_planes, num_classes)
         self.in_planes = in_planes
 
-        self.confidence = nn.Linear(in_planes, 1)
-
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
@@ -111,7 +107,7 @@ class DenseNet3(nn.Module):
                 m.bias.data.zero_()
             elif isinstance(m, nn.Linear):
                 m.bias.data.zero_()
-
+                    
     def forward(self, x):
         out = self.conv1(x)
         out = self.trans1(self.block1(out))
@@ -120,8 +116,46 @@ class DenseNet3(nn.Module):
         out = self.relu(self.bn1(out))
         out = F.avg_pool2d(out, 8)
         out = out.view(-1, self.in_planes)
-
-        pred = self.fc(out)
-        confidence = self.confidence(out)
-
-        return pred, confidence
+        return self.fc(out), None
+    
+    # function to extact the multiple features
+    def feature_list(self, x):
+        out_list = []
+        out = self.conv1(x)
+        out_list.append(out)
+        out = self.trans1(self.block1(out))
+        out_list.append(out)
+        out = self.trans2(self.block2(out))
+        out_list.append(out)
+        out = self.block3(out)
+        out = self.relu(self.bn1(out))
+        out_list.append(out)
+        out = F.avg_pool2d(out, 8)
+        out = out.view(-1, self.in_planes)
+        
+        return self.fc(out), out_list
+    
+    def intermediate_forward(self, x, layer_index):
+        out = self.conv1(x)
+        if layer_index == 1:
+            out = self.trans1(self.block1(out)) 
+        elif layer_index == 2:
+            out = self.trans1(self.block1(out))
+            out = self.trans2(self.block2(out))                
+        elif layer_index == 3:
+            out = self.trans1(self.block1(out))
+            out = self.trans2(self.block2(out))
+            out = self.block3(out)
+            out = self.relu(self.bn1(out))
+        return out
+    
+    # function to extact the penultimate features
+    def penultimate_forward(self, x):
+        out = self.conv1(x)
+        out = self.trans1(self.block1(out))
+        out = self.trans2(self.block2(out))
+        out = self.block3(out)
+        penultimate = self.relu(self.bn1(out))
+        out = F.avg_pool2d(penultimate, 8)
+        out = out.view(-1, self.in_planes)
+        return self.fc(out), penultimate

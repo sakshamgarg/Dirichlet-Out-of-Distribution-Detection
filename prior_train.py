@@ -69,12 +69,9 @@ print args
 if args.dataset == 'svhn':
     normalize = transforms.Normalize(mean=[x / 255.0 for x in[109.9, 109.7, 113.8]],
                                      std=[x / 255.0 for x in [50.1, 50.6, 50.8]])
-elif args.dataset == 'cifar10':
+elif args.dataset in ['cifar10', 'cifar100']:
     normalize = transforms.Normalize(mean=[x / 255.0 for x in [125.3, 123.0, 113.9]],
                                      std=[x / 255.0 for x in [63.0, 62.1, 66.7]])
-elif args.dataset == 'cifar100':
-    normalize = transforms.Normalize(mean=[0.5071, 0.4867, 0.4408],
-                                    std=[0.2675, 0.2565, 0.2761])
 else:
     raise ValueError("No such dataset")
 
@@ -178,8 +175,6 @@ def test(loader):
     correct = np.array(correct).astype(bool)
     probability = np.array(probability)
     confidence = np.array(confidence)
-
-    #plot_histograms(correct, probability)
 
     val_acc = np.mean(correct)
     conf_min = np.min(confidence)
@@ -287,11 +282,8 @@ def isnan(x):
 # Start with a reasonable guess for lambda
 for epoch in range(1, args.epochs):
     xentropy_loss_avg = 0.
-    kl_loss_avg = 0.
-    confidence_avg = 0.
     correct_count = 0.
     total = 0.
-    confidence_loss_avg = 0.
 
     progress_bar = tqdm(train_loader)
     for i, (images, labels) in enumerate(progress_bar):
@@ -302,19 +294,18 @@ for epoch in range(1, args.epochs):
 
         cnn.zero_grad()
 
-        pred_original, _ = cnn(images)
+        pred, _ = cnn(images)
 
-        total_loss = criterion(alphas, labels)
+        total_loss = criterion(pred, labels)
 
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(cnn.parameters(), args.gradient_norm)
 
         cnn_optimizer.step()
 
-        xentropy_loss_avg += torch.mean(train_loss).item()
-        kl_loss_avg += torch.mean(train_loss_KL).item()
+        xentropy_loss_avg += torch.mean(total_loss).item()
 
-        pred_idx = torch.argmax(pred_original.data, 1)
+        pred_idx = torch.argmax(pred.data, 1)
         total += labels.size(0)
 
         correct_count += (pred_idx == labels.data).sum()
@@ -322,10 +313,10 @@ for epoch in range(1, args.epochs):
 
         progress_bar.set_postfix(
             xentropy='%.3f' % (xentropy_loss_avg / (i + 1)),
-            KL_loss='%.4f' % (kl_loss_avg / (i + 1)),
             acc='%.3f' % accuracy)
 
-    tqdm.write('test_acc: %.3f' % test_acc)
+    test_acc, conf_min, conf_max, conf_avg = test(test_loader)
+    tqdm.write('test_acc: %.3f, conf_min: %.3f, conf_max: %.3f, conf_avg: %.3f' % (test_acc, conf_min, conf_max, conf_avg))
 
     fpr = ood_evaluate()
     tqdm.write("FPR at TPR=95%%: %.3f" % (fpr))

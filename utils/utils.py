@@ -6,6 +6,8 @@ from torch.nn.parameter import Parameter
 import torch.nn.functional as F
 import torch.nn as nn
 
+clamp_threshold = 1000
+delta = 0.1
 class Transit(nn.Module):
     def __init__(self, in_features, out_features, bias=True):
         super(Transit, self).__init__()
@@ -19,13 +21,20 @@ class Transit(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.weight.data.copy_(torch.zeros(self.in_features, self.in_features))
+        self.weight.data.copy_(0.01 * torch.ones(self.in_features, self.out_features))
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            self.bias.data.copy_(torch.zeros(self.out_features, ))
 
     def forward(self, input):
-        weight = torch.clamp(self.weight, min=-1, max=1)
-        return F.linear(input, self.weight, self.bias) + input
+        weight = torch.relu(self.weight)
+        #bias = torch.clamp(self.bias, min=0)
+        #norm_input = torch.norm(input, 2, -1)
+        epsilon = F.linear(input, weight, self.bias)
+        #norm_epsilon = torch.norm(epsilon, 2, -1)
+        #ratio = norm_epsilon / norm_input
+        #scale = torch.max(ratio / 0.1, torch.ones(ratio.shape[0], ).cuda()).unsqueeze(-1)
+        #epsilon = epsilon / scale
+        return epsilon + input
 
     def extra_repr(self):
         return 'in_features={}, out_features={}, bias={}'.format(
@@ -49,10 +58,7 @@ def one_hot(seq_batch, depth):
     return out.scatter_(dim,index,1)
 
 def mse_loss(label, alpha, max_weight, option="variational"):
-    if option == "variational":
-        loss = -(torch.digamma(alpha) - torch.digamma(alpha.sum(-1)).unsqueeze(-1))
-    elif option == "prior":
-        loss = -torch.log(alpha / alpha.sum(-1, keepdim=True))
+    loss = -(torch.digamma(alpha) - torch.digamma(alpha.sum(-1)).unsqueeze(-1))
     selected_loss = loss.gather(1, label.unsqueeze(-1)).squeeze()
    
     mask = 1 - one_hot(label, alpha.size(1))
@@ -81,13 +87,30 @@ def entropy(alpha):
     return entropy, logB, digamma_1, digamma_2
 
 def obtain_dirichelets(logits, func=lambda x:torch.relu(x), mean=False):
-    alpha = torch.exp(logits).clamp(0, 1000)
+    alpha = torch.exp(logits).clamp(0, clamp_threshold)
     evidence = func(alpha) 
     ent, ret1, ret2, ret3 = entropy(evidence)    
     conf = -ent
     if mean:
         conf = torch.mean(conf)
     return alpha, evidence, conf
+
+def reproject_dirichlets(logits, proj, model, mean=False, logscale=False):
+    if logscale:
+        alphas = torch.log(torch.exp(logits) + 1) + 1
+    else:
+        alphas = torch.exp(logits).clamp(0, clamp_threshold)
+    alphas = proj(alphas)
+
+    scale = torch.max(alphas,dim=-1,keepdim=True)[0] / clamp_threshold
+    scale = torch.clamp(scale, min=1)
+    alphas = alphas / scale
+
+    ent, ret1, ret2, ret3 = entropy(alphas)
+    conf = -ent
+    if mean:
+        conf = torch.mean(conf)
+    return conf, alphas
 
 class CSVLogger():
     def __init__(self, args, filename='log.csv', fieldnames=['epoch']):
